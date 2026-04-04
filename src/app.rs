@@ -1,9 +1,9 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_editor};
+use iced::widget::{button, column, container, row, scrollable, stack, text, text_editor};
 use iced::{Color, Element, Length, Task};
 
 use crate::editor_view;
 use crate::file_io::{self, OpenedFile};
-use crate::find_replace::{FindReplaceMessage, FindReplaceState};
+use crate::find_replace::{FindReplaceMessage, FindReplaceState, SearchSettings};
 use crate::line_numbers;
 use crate::status_bar;
 use crate::tab::Tab;
@@ -215,11 +215,16 @@ impl App {
                 Task::none()
             }
             Message::FindReplace(msg) => {
+                let mut focus_editor = false;
                 match msg {
                     FindReplaceMessage::SearchTermChanged(term) => {
                         self.find_replace.search_term = term;
-                        if let Some(tab) = self.tabs.get(self.active_tab) {
-                            self.find_replace.find_all(&tab.text());
+                        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                            let cursor = tab.content.cursor();
+                            let cursor_pos =
+                                Some((cursor.position.line, cursor.position.column));
+                            self.find_replace.find_all(&tab.text(), cursor_pos);
+                            self.move_cursor_to_current_match();
                         }
                     }
                     FindReplaceMessage::ReplaceTermChanged(term) => {
@@ -227,9 +232,13 @@ impl App {
                     }
                     FindReplaceMessage::FindNext => {
                         self.find_replace.find_next();
+                        self.move_cursor_to_current_match();
+                        focus_editor = true;
                     }
                     FindReplaceMessage::FindPrev => {
                         self.find_replace.find_prev();
+                        self.move_cursor_to_current_match();
+                        focus_editor = true;
                     }
                     FindReplaceMessage::ReplaceCurrent => {
                         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
@@ -238,29 +247,41 @@ impl App {
                             {
                                 tab.force_snapshot();
                                 tab.set_content(&new_text);
-                                self.find_replace.find_all(&tab.text());
+                                self.find_replace.find_all(&tab.text(), None);
+                                self.move_cursor_to_current_match();
                             }
                         }
+                        focus_editor = true;
                     }
                     FindReplaceMessage::ReplaceAll => {
                         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                             let new_text = self.find_replace.replace_all_in_text(&tab.text());
                             tab.force_snapshot();
                             tab.set_content(&new_text);
-                            self.find_replace.find_all(&tab.text());
+                            self.find_replace.find_all(&tab.text(), None);
                         }
+                        focus_editor = true;
                     }
                     FindReplaceMessage::ToggleCaseSensitive(v) => {
                         self.find_replace.case_sensitive = v;
-                        if let Some(tab) = self.tabs.get(self.active_tab) {
-                            self.find_replace.find_all(&tab.text());
+                        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                            let cursor = tab.content.cursor();
+                            let cursor_pos =
+                                Some((cursor.position.line, cursor.position.column));
+                            self.find_replace.find_all(&tab.text(), cursor_pos);
+                            self.move_cursor_to_current_match();
                         }
                     }
                     FindReplaceMessage::Close => {
                         self.show_find_replace = false;
+                        focus_editor = true;
                     }
                 }
-                Task::none()
+                if focus_editor {
+                    iced::widget::operation::focus(editor_view::EDITOR_ID)
+                } else {
+                    Task::none()
+                }
             }
 
             // --- View ---
@@ -308,16 +329,24 @@ impl App {
         // --- Tab bar ---
         let tab_bar = self.view_tab_bar(preset);
 
-        // --- Find & Replace bar ---
-        let find_replace_bar: Option<Element<Message>> = if self.show_find_replace {
-            Some(self.find_replace.view().map(Message::FindReplace))
+        // --- Search settings for highlighting ---
+        let search_settings = if self.show_find_replace {
+            SearchSettings {
+                search_term: self.find_replace.search_term.clone(),
+                case_sensitive: self.find_replace.case_sensitive,
+                highlight_color: preset.find_highlight.to_iced(),
+            }
         } else {
-            None
+            SearchSettings {
+                search_term: String::new(),
+                case_sensitive: false,
+                highlight_color: preset.find_highlight.to_iced(),
+            }
         };
 
         // --- Editor area ---
         let editor_area: Element<Message> = if let Some(tab) = self.tabs.get(self.active_tab) {
-            let editor = editor_view::view(tab, preset, self.word_wrap);
+            let editor = editor_view::view(tab, preset, self.word_wrap, search_settings);
 
             if self.show_line_numbers {
                 let gutter = line_numbers::view(tab.line_count(), preset.font_size, preset);
@@ -332,6 +361,22 @@ impl App {
                 .into()
         };
 
+        // --- Editor with find/replace overlay ---
+        let editor_with_overlay: Element<Message> = if self.show_find_replace {
+            let find_panel = container(
+                self.find_replace.view(preset).map(Message::FindReplace),
+            )
+            .align_right(Length::Fill)
+            .padding([4, 8]);
+
+            stack![editor_area, find_panel]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            editor_area
+        };
+
         // --- Status bar ---
         let status_bar: Element<Message> = if let Some(tab) = self.tabs.get(self.active_tab) {
             let (line, col) = tab.cursor_position();
@@ -341,13 +386,9 @@ impl App {
         };
 
         // --- Compose layout ---
-        let mut layout = column![menu_bar, tab_bar]
+        let layout = column![menu_bar, tab_bar, editor_with_overlay, status_bar]
             .width(Length::Fill)
             .height(Length::Fill);
-        if let Some(fr) = find_replace_bar {
-            layout = layout.push(fr);
-        }
-        layout = layout.push(editor_area).push(status_bar);
 
         layout.into()
     }
@@ -445,6 +486,14 @@ impl App {
         .width(Length::Fill)
         .padding([4, 8])
         .into()
+    }
+
+    fn move_cursor_to_current_match(&mut self) {
+        if let Some((line, col)) = self.find_replace.current_match_position() {
+            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                tab.move_cursor_to_select(line, col, self.find_replace.search_term.len());
+            }
+        }
     }
 
     fn close_tab(&mut self, idx: usize) {

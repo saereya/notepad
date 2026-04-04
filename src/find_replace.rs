@@ -1,5 +1,74 @@
+use iced::advanced::text::highlighter::{self, Highlighter};
 use iced::widget::{button, container, row, text, text_input, toggler};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Color, Element, Length};
+use std::ops::Range;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchSettings {
+    pub search_term: String,
+    pub case_sensitive: bool,
+    pub highlight_color: Color,
+}
+
+pub struct SearchHighlighter {
+    settings: SearchSettings,
+    current_line: usize,
+}
+
+impl Highlighter for SearchHighlighter {
+    type Settings = SearchSettings;
+    type Highlight = Color;
+    type Iterator<'a> = std::vec::IntoIter<(Range<usize>, Color)>;
+
+    fn new(settings: &Self::Settings) -> Self {
+        Self {
+            settings: settings.clone(),
+            current_line: 0,
+        }
+    }
+
+    fn update(&mut self, new_settings: &Self::Settings) {
+        self.settings = new_settings.clone();
+        self.current_line = 0;
+    }
+
+    fn change_line(&mut self, line: usize) {
+        self.current_line = line;
+    }
+
+    fn highlight_line(&mut self, line: &str) -> Self::Iterator<'_> {
+        let mut highlights = Vec::new();
+
+        if !self.settings.search_term.is_empty() {
+            let (haystack, needle) = if self.settings.case_sensitive {
+                (line.to_string(), self.settings.search_term.clone())
+            } else {
+                (line.to_lowercase(), self.settings.search_term.to_lowercase())
+            };
+
+            for (i, _) in haystack.match_indices(&needle) {
+                highlights.push((i..i + needle.len(), self.settings.highlight_color));
+            }
+        }
+
+        self.current_line += 1;
+        highlights.into_iter()
+    }
+
+    fn current_line(&self) -> usize {
+        self.current_line
+    }
+}
+
+pub fn format_highlight(
+    color: &Color,
+    _theme: &iced::Theme,
+) -> highlighter::Format<iced::Font> {
+    highlighter::Format {
+        color: Some(*color),
+        font: None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum FindReplaceMessage {
@@ -32,7 +101,7 @@ impl FindReplaceState {
         }
     }
 
-    pub fn find_all(&mut self, text: &str) {
+    pub fn find_all(&mut self, text: &str, cursor: Option<(usize, usize)>) {
         self.matches.clear();
         self.current_match = None;
 
@@ -65,7 +134,16 @@ impl FindReplaceState {
         }
 
         if !self.matches.is_empty() {
-            self.current_match = Some(0);
+            if let Some((cursor_line, cursor_col)) = cursor {
+                // Find first match at or after cursor position
+                self.current_match = self
+                    .matches
+                    .iter()
+                    .position(|&(l, c)| l > cursor_line || (l == cursor_line && c >= cursor_col))
+                    .or(Some(0));
+            } else {
+                self.current_match = Some(0);
+            }
         }
     }
 
@@ -156,7 +234,7 @@ impl FindReplaceState {
         }
     }
 
-    pub fn view(&self) -> Element<'_, FindReplaceMessage> {
+    pub fn view(&self, preset: &crate::theme::ThemePreset) -> Element<'_, FindReplaceMessage> {
         let match_info = if self.search_term.is_empty() {
             String::new()
         } else if self.matches.is_empty() {
@@ -169,38 +247,57 @@ impl FindReplaceState {
             )
         };
 
+        let fg = preset.foreground.to_iced();
+        let panel_bg = preset.status_bar_background.to_iced();
+        let border_color = Color::from_rgba(fg.r, fg.g, fg.b, 0.2);
+
         let search_row = row![
             text_input("Search...", &self.search_term)
                 .on_input(FindReplaceMessage::SearchTermChanged)
-                .width(200),
-            button("Prev").on_press(FindReplaceMessage::FindPrev),
-            button("Next").on_press(FindReplaceMessage::FindNext),
-            text(match_info).width(80),
+                .width(180),
+            button(text("◀").size(12)).on_press(FindReplaceMessage::FindPrev),
+            button(text("▶").size(12)).on_press(FindReplaceMessage::FindNext),
+            text(match_info).size(12).color(fg),
         ]
-        .spacing(5)
+        .spacing(4)
         .align_y(Alignment::Center);
 
         let replace_row = row![
             text_input("Replace...", &self.replace_term)
                 .on_input(FindReplaceMessage::ReplaceTermChanged)
-                .width(200),
-            button("Replace").on_press(FindReplaceMessage::ReplaceCurrent),
-            button("Replace All").on_press(FindReplaceMessage::ReplaceAll),
+                .width(180),
+            button(text("Replace").size(12)).on_press(FindReplaceMessage::ReplaceCurrent),
+            button(text("All").size(12)).on_press(FindReplaceMessage::ReplaceAll),
             toggler(self.case_sensitive)
                 .label("Aa")
                 .on_toggle(FindReplaceMessage::ToggleCaseSensitive)
+                .size(14.0)
                 .width(Length::Shrink),
-            button("x").on_press(FindReplaceMessage::Close),
+            button(text("✕").size(12)).on_press(FindReplaceMessage::Close),
         ]
-        .spacing(5)
+        .spacing(4)
         .align_y(Alignment::Center);
 
         container(
             iced::widget::column![search_row, replace_row]
                 .spacing(4)
-                .padding(8),
+                .padding(6),
         )
-        .width(Length::Fill)
+        .style(move |_theme: &iced::Theme| container::Style {
+            background: Some(iced::Background::Color(panel_bg)),
+            border: iced::Border {
+                color: border_color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.3),
+                offset: iced::Vector::new(0.0, 2.0),
+                blur_radius: 8.0,
+            },
+            ..Default::default()
+        })
+        .width(Length::Shrink)
         .into()
     }
 }

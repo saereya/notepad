@@ -45,6 +45,12 @@ pub struct ThemePreset {
     pub status_bar_foreground: SerColor,
     pub gutter_background: SerColor,
     pub gutter_foreground: SerColor,
+    #[serde(default = "default_find_highlight")]
+    pub find_highlight: SerColor,
+}
+
+fn default_find_highlight() -> SerColor {
+    SerColor { r: 1.0, g: 0.8, b: 0.0, a: 0.45 }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,6 +112,7 @@ pub fn light_preset() -> ThemePreset {
         status_bar_foreground: SerColor::new(0.3, 0.3, 0.3),
         gutter_background: SerColor::new(0.95, 0.95, 0.95),
         gutter_foreground: SerColor::new(0.6, 0.6, 0.6),
+        find_highlight: SerColor { r: 1.0, g: 0.9, b: 0.0, a: 0.4 },
     }
 }
 
@@ -125,6 +132,7 @@ pub fn dark_preset() -> ThemePreset {
         status_bar_foreground: SerColor::new(0.6, 0.6, 0.6),
         gutter_background: SerColor::new(0.12, 0.12, 0.15),
         gutter_foreground: SerColor::new(0.4, 0.4, 0.4),
+        find_highlight: SerColor { r: 1.0, g: 0.8, b: 0.0, a: 0.45 },
     }
 }
 
@@ -144,5 +152,6 @@ pub fn solarized_preset() -> ThemePreset {
         status_bar_foreground: SerColor::new(0.40, 0.48, 0.51),
         gutter_background: SerColor::new(0.0, 0.14, 0.18),
         gutter_foreground: SerColor::new(0.35, 0.43, 0.46),
+        find_highlight: SerColor { r: 0.71, g: 0.54, b: 0.0, a: 0.45 },
     }
 }

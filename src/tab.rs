@@ -110,6 +110,20 @@ impl Tab {
         }
     }
 
+    pub fn move_cursor_to_select(&mut self, line: usize, col: usize, length: usize) {
+        let cursor = text_editor::Cursor {
+            position: text_editor::Position {
+                line,
+                column: col + length,
+            },
+            selection: Some(text_editor::Position {
+                line,
+                column: col,
+            }),
+        };
+        self.content.move_to(cursor);
+    }
+
     pub fn set_content(&mut self, text: &str) {
         self.content = text_editor::Content::with_text(text);
         self.is_dirty = true;
