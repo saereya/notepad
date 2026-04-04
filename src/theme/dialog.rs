@@ -1,5 +1,4 @@
-use iced::widget::{button, column, container, pick_list, row, slider, text,
-                     text_input, scrollable};
+use iced::widget::{button, column, container, pick_list, row, slider, text, text_input, scrollable};
 use iced::{Alignment, Color, Element, Length};
 
 use super::{SerColor, ThemeConfig, ThemePreset};
@@ -7,24 +6,18 @@ use super::{SerColor, ThemeConfig, ThemePreset};
 #[derive(Debug, Clone)]
 pub enum ThemeDialogMessage {
     PresetSelected(String),
-    BackgroundR(f32),
-    BackgroundG(f32),
-    BackgroundB(f32),
-    ForegroundR(f32),
-    ForegroundG(f32),
-    ForegroundB(f32),
-    SelectionR(f32),
-    SelectionG(f32),
-    SelectionB(f32),
-    AccentR(f32),
-    AccentG(f32),
-    AccentB(f32),
-    TabActiveR(f32),
-    TabActiveG(f32),
-    TabActiveB(f32),
-    TabInactiveR(f32),
-    TabInactiveG(f32),
-    TabInactiveB(f32),
+    BackgroundHex(String),
+    ForegroundHex(String),
+    SelectionHex(String),
+    AccentHex(String),
+    TabActiveHex(String),
+    TabInactiveHex(String),
+    TabCloseHex(String),
+    StatusBarBgHex(String),
+    StatusBarFgHex(String),
+    GutterBgHex(String),
+    GutterFgHex(String),
+    FindHighlightHex(String),
     FontFamilyChanged(String),
     FontSizeChanged(f32),
     Save,
@@ -34,13 +27,57 @@ pub enum ThemeDialogMessage {
 pub struct ThemeDialog {
     pub editing_preset: ThemePreset,
     pub selected_preset_name: String,
+    pub hex_fields: HexFields,
+    /// Snapshot of original config so Cancel can restore it
+    pub original_preset_name: String,
+    pub original_preset: ThemePreset,
+}
+
+#[derive(Debug, Clone)]
+pub struct HexFields {
+    pub background: String,
+    pub foreground: String,
+    pub selection: String,
+    pub accent: String,
+    pub tab_active: String,
+    pub tab_inactive: String,
+    pub tab_close: String,
+    pub status_bar_bg: String,
+    pub status_bar_fg: String,
+    pub gutter_bg: String,
+    pub gutter_fg: String,
+    pub find_highlight: String,
+}
+
+impl HexFields {
+    fn from_preset(p: &ThemePreset) -> Self {
+        Self {
+            background: p.background.to_hex(),
+            foreground: p.foreground.to_hex(),
+            selection: p.selection.to_hex(),
+            accent: p.accent.to_hex(),
+            tab_active: p.tab_active.to_hex(),
+            tab_inactive: p.tab_inactive.to_hex(),
+            tab_close: p.tab_close_button.to_hex(),
+            status_bar_bg: p.status_bar_background.to_hex(),
+            status_bar_fg: p.status_bar_foreground.to_hex(),
+            gutter_bg: p.gutter_background.to_hex(),
+            gutter_fg: p.gutter_foreground.to_hex(),
+            find_highlight: p.find_highlight.to_hex(),
+        }
+    }
 }
 
 impl ThemeDialog {
     pub fn new(config: &ThemeConfig) -> Self {
+        let preset = config.active_preset().clone();
+        let hex_fields = HexFields::from_preset(&preset);
         Self {
-            editing_preset: config.active_preset().clone(),
+            editing_preset: preset.clone(),
             selected_preset_name: config.active_preset.clone(),
+            hex_fields,
+            original_preset_name: config.active_preset.clone(),
+            original_preset: preset,
         }
     }
 
@@ -49,47 +86,119 @@ impl ThemeDialog {
             ThemeDialogMessage::PresetSelected(name) => {
                 if let Some(preset) = config.presets.get(&name) {
                     self.editing_preset = preset.clone();
-                    self.selected_preset_name = name;
+                    self.selected_preset_name = name.clone();
+                    self.hex_fields = HexFields::from_preset(&self.editing_preset);
+                    config.active_preset = name;
+                }
+                return false;
+            }
+            ThemeDialogMessage::BackgroundHex(v) => {
+                self.hex_fields.background = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.background = c;
                 }
             }
-            ThemeDialogMessage::BackgroundR(v) => self.editing_preset.background.r = v,
-            ThemeDialogMessage::BackgroundG(v) => self.editing_preset.background.g = v,
-            ThemeDialogMessage::BackgroundB(v) => self.editing_preset.background.b = v,
-            ThemeDialogMessage::ForegroundR(v) => self.editing_preset.foreground.r = v,
-            ThemeDialogMessage::ForegroundG(v) => self.editing_preset.foreground.g = v,
-            ThemeDialogMessage::ForegroundB(v) => self.editing_preset.foreground.b = v,
-            ThemeDialogMessage::SelectionR(v) => self.editing_preset.selection.r = v,
-            ThemeDialogMessage::SelectionG(v) => self.editing_preset.selection.g = v,
-            ThemeDialogMessage::SelectionB(v) => self.editing_preset.selection.b = v,
-            ThemeDialogMessage::AccentR(v) => self.editing_preset.accent.r = v,
-            ThemeDialogMessage::AccentG(v) => self.editing_preset.accent.g = v,
-            ThemeDialogMessage::AccentB(v) => self.editing_preset.accent.b = v,
-            ThemeDialogMessage::TabActiveR(v) => self.editing_preset.tab_active.r = v,
-            ThemeDialogMessage::TabActiveG(v) => self.editing_preset.tab_active.g = v,
-            ThemeDialogMessage::TabActiveB(v) => self.editing_preset.tab_active.b = v,
-            ThemeDialogMessage::TabInactiveR(v) => self.editing_preset.tab_inactive.r = v,
-            ThemeDialogMessage::TabInactiveG(v) => self.editing_preset.tab_inactive.g = v,
-            ThemeDialogMessage::TabInactiveB(v) => self.editing_preset.tab_inactive.b = v,
+            ThemeDialogMessage::ForegroundHex(v) => {
+                self.hex_fields.foreground = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.foreground = c;
+                }
+            }
+            ThemeDialogMessage::SelectionHex(v) => {
+                self.hex_fields.selection = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.selection = c;
+                }
+            }
+            ThemeDialogMessage::AccentHex(v) => {
+                self.hex_fields.accent = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.accent = c;
+                }
+            }
+            ThemeDialogMessage::TabActiveHex(v) => {
+                self.hex_fields.tab_active = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.tab_active = c;
+                }
+            }
+            ThemeDialogMessage::TabInactiveHex(v) => {
+                self.hex_fields.tab_inactive = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.tab_inactive = c;
+                }
+            }
+            ThemeDialogMessage::TabCloseHex(v) => {
+                self.hex_fields.tab_close = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.tab_close_button = c;
+                }
+            }
+            ThemeDialogMessage::StatusBarBgHex(v) => {
+                self.hex_fields.status_bar_bg = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.status_bar_background = c;
+                }
+            }
+            ThemeDialogMessage::StatusBarFgHex(v) => {
+                self.hex_fields.status_bar_fg = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.status_bar_foreground = c;
+                }
+            }
+            ThemeDialogMessage::GutterBgHex(v) => {
+                self.hex_fields.gutter_bg = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.gutter_background = c;
+                }
+            }
+            ThemeDialogMessage::GutterFgHex(v) => {
+                self.hex_fields.gutter_fg = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.gutter_foreground = c;
+                }
+            }
+            ThemeDialogMessage::FindHighlightHex(v) => {
+                self.hex_fields.find_highlight = v.clone();
+                if let Some(c) = SerColor::from_hex(&v) {
+                    self.editing_preset.find_highlight = SerColor {
+                        a: self.editing_preset.find_highlight.a,
+                        ..c
+                    };
+                }
+            }
             ThemeDialogMessage::FontFamilyChanged(f) => self.editing_preset.font_family = f,
             ThemeDialogMessage::FontSizeChanged(s) => self.editing_preset.font_size = s,
             ThemeDialogMessage::Save => {
+                // Already applied live — just persist to disk
                 config
                     .presets
                     .insert(self.selected_preset_name.clone(), self.editing_preset.clone());
                 config.active_preset = self.selected_preset_name.clone();
                 let _ = super::config::save_config(config);
-                return true; // close dialog
+                return true;
             }
             ThemeDialogMessage::Cancel => {
-                return true; // close dialog
+                // Restore original state
+                config
+                    .presets
+                    .insert(self.original_preset_name.clone(), self.original_preset.clone());
+                config.active_preset = self.original_preset_name.clone();
+                return true;
             }
         }
+        // Apply live preview
+        config
+            .presets
+            .insert(self.selected_preset_name.clone(), self.editing_preset.clone());
+        config.active_preset = self.selected_preset_name.clone();
         false
     }
 
     pub fn view<'a>(&'a self, config: &'a ThemeConfig) -> Element<'a, ThemeDialogMessage> {
         let preset_names: Vec<String> = config.presets.keys().cloned().collect();
         let p = &self.editing_preset;
+        let h = &self.hex_fields;
 
         let preset_picker = row![
             text("Preset:").width(100),
@@ -115,45 +224,35 @@ impl ThemeDialog {
         .spacing(10)
         .align_y(Alignment::Center);
 
+        let panel_bg = Color::from_rgba(0.12, 0.12, 0.15, 0.97);
+        let panel_fg = Color::from_rgb(0.85, 0.85, 0.85);
+
         let content = column![
-            text("Theme Settings").size(20),
+            text("Theme Settings").size(20).color(panel_fg),
             divider(),
             preset_picker,
             divider(),
             font_row,
             divider(),
-            color_section("Background", &p.background,
-                ThemeDialogMessage::BackgroundR,
-                ThemeDialogMessage::BackgroundG,
-                ThemeDialogMessage::BackgroundB,
-            ),
-            color_section("Foreground", &p.foreground,
-                ThemeDialogMessage::ForegroundR,
-                ThemeDialogMessage::ForegroundG,
-                ThemeDialogMessage::ForegroundB,
-            ),
-            color_section("Selection", &p.selection,
-                ThemeDialogMessage::SelectionR,
-                ThemeDialogMessage::SelectionG,
-                ThemeDialogMessage::SelectionB,
-            ),
-            color_section("Accent", &p.accent,
-                ThemeDialogMessage::AccentR,
-                ThemeDialogMessage::AccentG,
-                ThemeDialogMessage::AccentB,
-            ),
+            text("Colors").size(16).color(panel_fg),
+            hex_color_row("Background", &h.background, &p.background, ThemeDialogMessage::BackgroundHex),
+            hex_color_row("Foreground", &h.foreground, &p.foreground, ThemeDialogMessage::ForegroundHex),
+            hex_color_row("Selection", &h.selection, &p.selection, ThemeDialogMessage::SelectionHex),
+            hex_color_row("Accent", &h.accent, &p.accent, ThemeDialogMessage::AccentHex),
+            hex_color_row("Find Highlight", &h.find_highlight, &p.find_highlight, ThemeDialogMessage::FindHighlightHex),
             divider(),
-            text("Tab Bar").size(16),
-            color_section("Active Tab", &p.tab_active,
-                ThemeDialogMessage::TabActiveR,
-                ThemeDialogMessage::TabActiveG,
-                ThemeDialogMessage::TabActiveB,
-            ),
-            color_section("Inactive Tab", &p.tab_inactive,
-                ThemeDialogMessage::TabInactiveR,
-                ThemeDialogMessage::TabInactiveG,
-                ThemeDialogMessage::TabInactiveB,
-            ),
+            text("Tab Bar").size(16).color(panel_fg),
+            hex_color_row("Active Tab", &h.tab_active, &p.tab_active, ThemeDialogMessage::TabActiveHex),
+            hex_color_row("Inactive Tab", &h.tab_inactive, &p.tab_inactive, ThemeDialogMessage::TabInactiveHex),
+            hex_color_row("Close Button", &h.tab_close, &p.tab_close_button, ThemeDialogMessage::TabCloseHex),
+            divider(),
+            text("Status Bar").size(16).color(panel_fg),
+            hex_color_row("Background", &h.status_bar_bg, &p.status_bar_background, ThemeDialogMessage::StatusBarBgHex),
+            hex_color_row("Foreground", &h.status_bar_fg, &p.status_bar_foreground, ThemeDialogMessage::StatusBarFgHex),
+            divider(),
+            text("Gutter").size(16).color(panel_fg),
+            hex_color_row("Background", &h.gutter_bg, &p.gutter_background, ThemeDialogMessage::GutterBgHex),
+            hex_color_row("Foreground", &h.gutter_fg, &p.gutter_foreground, ThemeDialogMessage::GutterFgHex),
             divider(),
             row![
                 button("Save").on_press(ThemeDialogMessage::Save),
@@ -161,20 +260,29 @@ impl ThemeDialog {
             ]
             .spacing(10),
         ]
-        .spacing(8)
+        .spacing(6)
         .padding(20)
-        .width(500);
+        .width(420);
 
-        container(scrollable(content))
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
-            .style(|_theme: &iced::Theme| container::Style {
-                background: Some(iced::Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.7))),
-                ..Default::default()
-            })
-            .into()
+        container(scrollable(
+            container(content)
+                .style(move |_theme: &iced::Theme| container::Style {
+                    background: Some(iced::Background::Color(panel_bg)),
+                    border: iced::Border {
+                        color: Color::from_rgb(0.3, 0.3, 0.35),
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    shadow: iced::Shadow {
+                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.5),
+                        offset: iced::Vector::new(0.0, 4.0),
+                        blur_radius: 20.0,
+                    },
+                    ..Default::default()
+                })
+        ))
+        .max_height(600)
+        .into()
     }
 }
 
@@ -189,36 +297,34 @@ fn divider<'a>() -> Element<'a, ThemeDialogMessage> {
         .into()
 }
 
-fn color_section<'a>(
+fn hex_color_row<'a>(
     label: &'a str,
+    hex_value: &str,
     color: &SerColor,
-    on_r: fn(f32) -> ThemeDialogMessage,
-    on_g: fn(f32) -> ThemeDialogMessage,
-    on_b: fn(f32) -> ThemeDialogMessage,
+    on_change: fn(String) -> ThemeDialogMessage,
 ) -> Element<'a, ThemeDialogMessage> {
     let preview_color = color.to_iced();
+    let hex_owned = hex_value.to_string();
     row![
-        text(label).width(100),
-        text("R").width(15),
-        slider(0.0..=1.0, color.r, on_r).width(80),
-        text("G").width(15),
-        slider(0.0..=1.0, color.g, on_g).width(80),
-        text("B").width(15),
-        slider(0.0..=1.0, color.b, on_b).width(80),
+        text(label).width(110).size(13),
+        text_input("#RRGGBB", &hex_owned)
+            .on_input(on_change)
+            .width(90)
+            .size(13),
         container(text(""))
-            .width(24)
-            .height(24)
+            .width(20)
+            .height(20)
             .style(move |_theme: &iced::Theme| container::Style {
                 background: Some(iced::Background::Color(preview_color)),
                 border: iced::Border {
                     color: Color::from_rgb(0.5, 0.5, 0.5),
                     width: 1.0,
-                    radius: 2.0.into(),
+                    radius: 3.0.into(),
                 },
                 ..Default::default()
             }),
     ]
-    .spacing(5)
+    .spacing(8)
     .align_y(Alignment::Center)
     .into()
 }

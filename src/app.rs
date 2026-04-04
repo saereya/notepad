@@ -314,13 +314,6 @@ impl App {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        // If theme dialog is open, show it as overlay
-        if self.show_theme_dialog {
-            if let Some(dialog) = &self.theme_dialog {
-                return dialog.view(&self.theme_config).map(Message::ThemeDialog);
-            }
-        }
-
         let preset = self.theme_config.active_preset();
 
         // --- Menu bar ---
@@ -386,11 +379,40 @@ impl App {
         };
 
         // --- Compose layout ---
-        let layout = column![menu_bar, tab_bar, editor_with_overlay, status_bar]
+        let main_view: Element<Message> = column![menu_bar, tab_bar, editor_with_overlay, status_bar]
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .into();
 
-        layout.into()
+        // --- Theme dialog overlay ---
+        if self.show_theme_dialog {
+            if let Some(dialog) = &self.theme_dialog {
+                let scrim = container(text(""))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .style(|_theme: &iced::Theme| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgba(
+                            0.0, 0.0, 0.0, 0.35,
+                        ))),
+                        ..Default::default()
+                    });
+
+                let dialog_panel = container(
+                    dialog.view(&self.theme_config).map(Message::ThemeDialog),
+                )
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill);
+
+                return stack![main_view, scrim, dialog_panel]
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .into();
+            }
+        }
+
+        main_view
     }
 
     fn view_menu_bar<'a>(&'a self, preset: &'a crate::theme::ThemePreset) -> Element<'a, Message> {
