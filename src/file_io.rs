@@ -72,15 +72,41 @@ pub async fn open_file_dialog() -> Result<OpenedFile, String> {
 pub async fn save_file(
     path: PathBuf,
     content: String,
-    _encoding: FileEncoding,
+    encoding: FileEncoding,
     line_ending: LineEnding,
 ) -> Result<PathBuf, String> {
+    // Normalize to LF first to avoid doubling \r\n
+    let normalized = content.replace("\r\n", "\n");
     let text = match line_ending {
-        LineEnding::CrLf => content.replace('\n', "\r\n"),
-        LineEnding::Lf => content,
+        LineEnding::CrLf => normalized.replace('\n', "\r\n"),
+        LineEnding::Lf => normalized,
     };
 
-    tokio::fs::write(&path, text.as_bytes())
+    let bytes = match encoding {
+        FileEncoding::Utf8 => text.into_bytes(),
+        FileEncoding::Utf8Bom => {
+            let mut buf = vec![0xEF, 0xBB, 0xBF];
+            buf.extend_from_slice(text.as_bytes());
+            buf
+        }
+        FileEncoding::Utf16Le => {
+            let mut buf = vec![0xFF, 0xFE];
+            for code_unit in text.encode_utf16() {
+                buf.extend_from_slice(&code_unit.to_le_bytes());
+            }
+            buf
+        }
+        FileEncoding::Utf16Be => {
+            let mut buf = vec![0xFE, 0xFF];
+            for code_unit in text.encode_utf16() {
+                buf.extend_from_slice(&code_unit.to_be_bytes());
+            }
+            buf
+        }
+        FileEncoding::Other(_) => text.into_bytes(),
+    };
+
+    tokio::fs::write(&path, &bytes)
         .await
         .map_err(|e| format!("Failed to save file: {e}"))?;
 

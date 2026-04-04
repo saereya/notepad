@@ -19,6 +19,8 @@ pub enum Message {
     NewTab,
     CloseTab(usize),
     CloseCurrentTab,
+    ConfirmCloseTab(usize),
+    CancelCloseTab,
     SwitchTab(usize),
     NextTab,
     PrevTab,
@@ -60,6 +62,7 @@ pub struct App {
     find_replace: FindReplaceState,
     word_wrap: bool,
     show_line_numbers: bool,
+    pending_close_tab: Option<usize>,
 }
 
 impl App {
@@ -75,6 +78,7 @@ impl App {
             find_replace: FindReplaceState::new(),
             word_wrap: true,
             show_line_numbers: true,
+            pending_close_tab: None,
         };
         (app, Task::none())
     }
@@ -135,12 +139,30 @@ impl App {
                 Task::none()
             }
             Message::CloseTab(idx) => {
-                self.close_tab(idx);
+                if idx < self.tabs.len() && self.tabs[idx].is_dirty {
+                    self.pending_close_tab = Some(idx);
+                    self.active_tab = idx;
+                } else {
+                    self.close_tab(idx);
+                }
                 Task::none()
             }
             Message::CloseCurrentTab => {
                 let idx = self.active_tab;
+                if idx < self.tabs.len() && self.tabs[idx].is_dirty {
+                    self.pending_close_tab = Some(idx);
+                } else {
+                    self.close_tab(idx);
+                }
+                Task::none()
+            }
+            Message::ConfirmCloseTab(idx) => {
+                self.pending_close_tab = None;
                 self.close_tab(idx);
+                Task::none()
+            }
+            Message::CancelCloseTab => {
+                self.pending_close_tab = None;
                 Task::none()
             }
             Message::SwitchTab(idx) => {
@@ -415,11 +437,42 @@ impl App {
             container(text("")).into()
         };
 
-        // --- Compose layout ---
-        let main_view: Element<Message> = column![menu_bar, tab_bar, editor_with_overlay, status_bar]
+        // --- Unsaved changes confirmation bar ---
+        let close_confirm: Option<Element<Message>> = self.pending_close_tab.map(|idx| {
+            let title = self.tabs.get(idx).map(|t| t.title.clone()).unwrap_or_default();
+            let bar_bg = preset.accent.to_iced();
+            let fg = preset.foreground.to_iced();
+            container(
+                row![
+                    text(format!("\"{}\" has unsaved changes. Close anyway?", title))
+                        .size(13)
+                        .color(fg),
+                    button(text("Close").size(13))
+                        .on_press(Message::ConfirmCloseTab(idx))
+                        .padding([2, 10]),
+                    button(text("Cancel").size(13))
+                        .on_press(Message::CancelCloseTab)
+                        .padding([2, 10]),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            )
             .width(Length::Fill)
-            .height(Length::Fill)
-            .into();
+            .padding([6, 12])
+            .style(move |_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(bar_bg)),
+                ..Default::default()
+            })
+            .into()
+        });
+
+        // --- Compose layout ---
+        let mut layout = column![menu_bar, tab_bar].width(Length::Fill).height(Length::Fill);
+        if let Some(bar) = close_confirm {
+            layout = layout.push(bar);
+        }
+        layout = layout.push(editor_with_overlay).push(status_bar);
+        let main_view: Element<Message> = layout.into();
 
         // --- Theme dialog overlay ---
         if self.show_theme_dialog {
@@ -559,7 +612,6 @@ impl App {
         if idx >= self.tabs.len() {
             return;
         }
-        // TODO: prompt for unsaved changes
         self.tabs.remove(idx);
         if self.tabs.is_empty() {
             self.tabs.push(Tab::new());
