@@ -17,7 +17,7 @@ pub fn view<'a>(
     let selection = preset.selection.to_iced();
 
     let wrapping = if word_wrap {
-        Wrapping::Word
+        Wrapping::WordOrGlyph
     } else {
         Wrapping::None
     };
@@ -26,6 +26,7 @@ pub fn view<'a>(
         .on_action(Message::EditorAction)
         .font(iced::Font::MONOSPACE)
         .size(preset.font_size)
+        .height(Length::Fill)
         .wrapping(wrapping)
         .key_binding(handle_key_binding)
         .style(move |_theme: &iced::Theme, _status| text_editor::Style {
