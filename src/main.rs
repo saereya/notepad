@@ -13,6 +13,7 @@ fn main() -> iced::Result {
     iced::application(app::App::boot, app::App::update, app::App::view)
         .title("Notepad")
         .theme(app::App::theme)
+        .subscription(app::App::subscription)
         .window_size((900.0, 600.0))
         .centered()
         .run()

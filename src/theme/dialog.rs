@@ -20,6 +20,8 @@ pub enum ThemeDialogMessage {
     FindHighlightHex(String),
     FontFamilyChanged(String),
     FontSizeChanged(f32),
+    Undo,
+    Redo,
     Save,
     Cancel,
 }
@@ -31,6 +33,9 @@ pub struct ThemeDialog {
     /// Snapshot of original config so Cancel can restore it
     pub original_preset_name: String,
     pub original_preset: ThemePreset,
+    /// Undo/redo stack for hex field edits
+    undo_stack: Vec<(HexFields, ThemePreset)>,
+    undo_pos: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -75,16 +80,37 @@ impl ThemeDialog {
         Self {
             editing_preset: preset.clone(),
             selected_preset_name: config.active_preset.clone(),
-            hex_fields,
+            hex_fields: hex_fields.clone(),
             original_preset_name: config.active_preset.clone(),
-            original_preset: preset,
+            original_preset: preset.clone(),
+            undo_stack: vec![(hex_fields, preset)],
+            undo_pos: 0,
         }
+    }
+
+    fn push_undo(&mut self) {
+        // Truncate any redo history
+        self.undo_stack.truncate(self.undo_pos + 1);
+        self.undo_stack.push((self.hex_fields.clone(), self.editing_preset.clone()));
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+        self.undo_pos = self.undo_stack.len() - 1;
+    }
+
+    fn restore_snapshot(&mut self, config: &mut ThemeConfig) {
+        let (hex, preset) = &self.undo_stack[self.undo_pos];
+        self.hex_fields = hex.clone();
+        self.editing_preset = preset.clone();
+        config.presets.insert(self.selected_preset_name.clone(), self.editing_preset.clone());
+        config.active_preset = self.selected_preset_name.clone();
     }
 
     pub fn update(&mut self, message: ThemeDialogMessage, config: &mut ThemeConfig) -> bool {
         match message {
             ThemeDialogMessage::PresetSelected(name) => {
                 if let Some(preset) = config.presets.get(&name) {
+                    self.push_undo();
                     self.editing_preset = preset.clone();
                     self.selected_preset_name = name.clone();
                     self.hex_fields = HexFields::from_preset(&self.editing_preset);
@@ -92,73 +118,104 @@ impl ThemeDialog {
                 }
                 return false;
             }
+            ThemeDialogMessage::Undo => {
+                if self.undo_pos > 0 {
+                    // Save current state if we're at the tip
+                    if self.undo_pos == self.undo_stack.len() - 1 {
+                        self.push_undo();
+                        self.undo_pos -= 1; // push_undo moved us forward, go back one extra
+                    }
+                    self.undo_pos -= 1;
+                    self.restore_snapshot(config);
+                }
+                return false;
+            }
+            ThemeDialogMessage::Redo => {
+                if self.undo_pos + 1 < self.undo_stack.len() {
+                    self.undo_pos += 1;
+                    self.restore_snapshot(config);
+                }
+                return false;
+            }
             ThemeDialogMessage::BackgroundHex(v) => {
+                self.push_undo();
                 self.hex_fields.background = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.background = c;
                 }
             }
             ThemeDialogMessage::ForegroundHex(v) => {
+                self.push_undo();
                 self.hex_fields.foreground = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.foreground = c;
                 }
             }
             ThemeDialogMessage::SelectionHex(v) => {
+                self.push_undo();
                 self.hex_fields.selection = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.selection = c;
                 }
             }
             ThemeDialogMessage::AccentHex(v) => {
+                self.push_undo();
                 self.hex_fields.accent = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.accent = c;
                 }
             }
             ThemeDialogMessage::TabActiveHex(v) => {
+                self.push_undo();
                 self.hex_fields.tab_active = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.tab_active = c;
                 }
             }
             ThemeDialogMessage::TabInactiveHex(v) => {
+                self.push_undo();
                 self.hex_fields.tab_inactive = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.tab_inactive = c;
                 }
             }
             ThemeDialogMessage::TabCloseHex(v) => {
+                self.push_undo();
                 self.hex_fields.tab_close = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.tab_close_button = c;
                 }
             }
             ThemeDialogMessage::StatusBarBgHex(v) => {
+                self.push_undo();
                 self.hex_fields.status_bar_bg = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.status_bar_background = c;
                 }
             }
             ThemeDialogMessage::StatusBarFgHex(v) => {
+                self.push_undo();
                 self.hex_fields.status_bar_fg = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.status_bar_foreground = c;
                 }
             }
             ThemeDialogMessage::GutterBgHex(v) => {
+                self.push_undo();
                 self.hex_fields.gutter_bg = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.gutter_background = c;
                 }
             }
             ThemeDialogMessage::GutterFgHex(v) => {
+                self.push_undo();
                 self.hex_fields.gutter_fg = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.gutter_foreground = c;
                 }
             }
             ThemeDialogMessage::FindHighlightHex(v) => {
+                self.push_undo();
                 self.hex_fields.find_highlight = v.clone();
                 if let Some(c) = SerColor::from_hex(&v) {
                     self.editing_preset.find_highlight = SerColor {
@@ -167,8 +224,14 @@ impl ThemeDialog {
                     };
                 }
             }
-            ThemeDialogMessage::FontFamilyChanged(f) => self.editing_preset.font_family = f,
-            ThemeDialogMessage::FontSizeChanged(s) => self.editing_preset.font_size = s,
+            ThemeDialogMessage::FontFamilyChanged(f) => {
+                self.push_undo();
+                self.editing_preset.font_family = f;
+            }
+            ThemeDialogMessage::FontSizeChanged(s) => {
+                self.push_undo();
+                self.editing_preset.font_size = s;
+            }
             ThemeDialogMessage::Save => {
                 // Already applied live — just persist to disk
                 config

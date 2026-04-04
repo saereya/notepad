@@ -1,11 +1,16 @@
 use iced::keyboard::{key::Named, Key};
-use iced::widget::text_editor::{Binding, KeyPress};
+use iced::widget::text_editor::{Binding, KeyPress, Status};
 
 use crate::app::Message;
 
 pub fn handle_key_binding(key_press: KeyPress) -> Option<Binding<Message>> {
+    let focused = matches!(key_press.status, Status::Focused { .. });
     let ctrl = key_press.modifiers.command();
     let shift = key_press.modifiers.shift();
+
+    if !focused {
+        return None;
+    }
 
     let custom = match (&key_press.key, ctrl, shift) {
         // File operations

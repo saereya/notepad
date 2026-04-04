@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, row, scrollable, stack, text, text_editor};
-use iced::{Color, Element, Length, Task};
+use iced::{Color, Element, Length, Subscription, Task};
 
 use crate::editor_view;
 use crate::file_io::{self, OpenedFile};
@@ -45,6 +45,9 @@ pub enum Message {
     // Theme
     OpenThemeDialog,
     ThemeDialog(ThemeDialogMessage),
+
+    // Misc
+    NoOp,
 }
 
 pub struct App {
@@ -80,11 +83,43 @@ impl App {
         self.theme_config.to_iced_theme()
     }
 
+    pub fn subscription(&self) -> Subscription<Message> {
+        if self.show_theme_dialog {
+            iced::keyboard::listen().map(|event| {
+                use iced::keyboard::{Event, Key};
+                match event {
+                    Event::KeyPressed { key: Key::Character(c), modifiers, .. }
+                        if modifiers.command() && !modifiers.shift() && c.as_str() == "z" =>
+                    {
+                        Message::ThemeDialog(ThemeDialogMessage::Undo)
+                    }
+                    Event::KeyPressed { key: Key::Character(c), modifiers, .. }
+                        if modifiers.command() && modifiers.shift() && c.as_str() == "Z" =>
+                    {
+                        Message::ThemeDialog(ThemeDialogMessage::Redo)
+                    }
+                    Event::KeyPressed { key: Key::Character(c), modifiers, .. }
+                        if modifiers.command() && !modifiers.shift() && c.as_str() == "y" =>
+                    {
+                        Message::ThemeDialog(ThemeDialogMessage::Redo)
+                    }
+                    _ => Message::NoOp,
+                }
+            })
+        } else {
+            Subscription::none()
+        }
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::EditorAction(action) => {
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     let is_edit = action.is_edit();
+                    let is_paste = matches!(action, text_editor::Action::Edit(text_editor::Edit::Paste(_)));
+                    if is_paste {
+                        tab.force_snapshot();
+                    }
                     tab.content.perform(action);
                     if is_edit {
                         tab.record_edit();
@@ -310,6 +345,8 @@ impl App {
                 }
                 Task::none()
             }
+
+            Message::NoOp => Task::none(),
         }
     }
 
