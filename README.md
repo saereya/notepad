@@ -34,10 +34,28 @@ A fast, lightweight tabbed text editor built with Rust and [iced](https://iced.r
 Requires Rust 1.85+ (edition 2024).
 
 ```sh
-cargo build --release
+make
 ```
 
-The binary will be at `target/release/notepad`.
+## Installing
+
+Installs to `/usr/local/bin` by default:
+
+```sh
+sudo make install
+```
+
+To install somewhere else:
+
+```sh
+make install PREFIX=~/.local
+```
+
+To uninstall:
+
+```sh
+sudo make uninstall
+```
 
 ## Themes
 
