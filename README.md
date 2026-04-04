@@ -2,6 +2,8 @@
 
 A fast, lightweight tabbed text editor built with Rust and [iced](https://iced.rs).
 
+I built this out of a desire to have a very basic but themeable notepad for my linux distro. No thrills, just a clean notepad interface with simple themeing. Built in Rust for Super Memory Safety ;)
+
 ## Features
 
 - **Tabbed editing** - Open and edit multiple files at once
@@ -28,6 +30,10 @@ A fast, lightweight tabbed text editor built with Rust and [iced](https://iced.r
 | Ctrl+Tab | Next tab |
 | Ctrl+Shift+Tab | Previous tab |
 | Ctrl+L | Toggle line numbers |
+
+## Screenshots
+<img width="1273" height="696" alt="image" src="https://github.com/user-attachments/assets/3ba02083-23d8-4a7e-af79-ae6ac4eee803" />
+
 
 ## Building
 
