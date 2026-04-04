@@ -1,0 +1,16 @@
+[package]
+name = "notepad"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14", features = ["advanced", "highlighter", "tokio"] }
+tokio = { version = "1", features = ["fs", "io-util"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"
+arboard = "3"
+encoding_rs = "0.8"
+chardetng = "0.1"
+uuid = { version = "1", features = ["v4"] }
