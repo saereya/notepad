@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Notepad
+Comment=A lightweight tabbed text editor
+Exec=notepad
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;
+Keywords=text;editor;notepad;
