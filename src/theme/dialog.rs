@@ -233,9 +233,12 @@ impl ThemeDialog {
                 self.editing_preset.font_size = s;
             }
             ThemeDialogMessage::Save => {
-                // Already applied live — just persist to disk
+                // Already applied live — persist to disk
                 config
                     .presets
+                    .insert(self.selected_preset_name.clone(), self.editing_preset.clone());
+                config
+                    .custom_presets
                     .insert(self.selected_preset_name.clone(), self.editing_preset.clone());
                 config.active_preset = self.selected_preset_name.clone();
                 let _ = super::config::save_config(config);

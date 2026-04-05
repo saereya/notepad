@@ -2,15 +2,37 @@ pub mod config;
 pub mod dialog;
 
 use iced::Color;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct SerColor {
     pub r: f32,
     pub g: f32,
     pub b: f32,
     pub a: f32,
+}
+
+impl Serialize for SerColor {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let r = (self.r * 255.0).round() as u8;
+        let g = (self.g * 255.0).round() as u8;
+        let b = (self.b * 255.0).round() as u8;
+        if (self.a - 1.0).abs() < 0.001 {
+            serializer.serialize_str(&format!("#{:02X}{:02X}{:02X}", r, g, b))
+        } else {
+            let a = (self.a * 255.0).round() as u8;
+            serializer.serialize_str(&format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SerColor {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        SerColor::from_hex(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("invalid hex color: {s}")))
+    }
 }
 
 impl SerColor {
@@ -31,18 +53,32 @@ impl SerColor {
 
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.trim_start_matches('#');
-        if hex.len() != 6 {
-            return None;
+        match hex.len() {
+            6 => {
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                Some(Self {
+                    r: r as f32 / 255.0,
+                    g: g as f32 / 255.0,
+                    b: b as f32 / 255.0,
+                    a: 1.0,
+                })
+            }
+            8 => {
+                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+                let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+                Some(Self {
+                    r: r as f32 / 255.0,
+                    g: g as f32 / 255.0,
+                    b: b as f32 / 255.0,
+                    a: a as f32 / 255.0,
+                })
+            }
+            _ => None,
         }
-        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-        Some(Self {
-            r: r as f32 / 255.0,
-            g: g as f32 / 255.0,
-            b: b as f32 / 255.0,
-            a: 1.0,
-        })
     }
 }
 
@@ -76,10 +112,13 @@ fn default_find_highlight() -> SerColor {
     SerColor { r: 1.0, g: 0.8, b: 0.0, a: 0.45 }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ThemeConfig {
     pub active_preset: String,
+    /// Merged view of built-in + custom presets (used by the app)
     pub presets: HashMap<String, ThemePreset>,
+    /// Only user-modified/created presets (persisted to config file)
+    pub custom_presets: HashMap<String, ThemePreset>,
 }
 
 impl Default for ThemeConfig {
@@ -92,6 +131,7 @@ impl Default for ThemeConfig {
         Self {
             active_preset: "dark".to_string(),
             presets,
+            custom_presets: HashMap::new(),
         }
     }
 }
