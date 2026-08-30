@@ -15,6 +15,17 @@ I built this out of a desire to have a very basic but themeable notepad for my l
 - **Line numbers** - Toggleable gutter
 - **Word wrap** - Toggleable word wrapping
 
+## Usage
+
+```sh
+notepad                  # empty buffer
+notepad notes.txt        # open a file (creates it on save if it doesn't exist)
+notepad a.txt b.txt      # one tab per file
+```
+
+Files can also be dropped onto the window, and the installed desktop entry
+registers Notepad for text files so it shows up under "Open With".
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |

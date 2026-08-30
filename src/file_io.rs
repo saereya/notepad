@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileEncoding {
@@ -44,19 +44,61 @@ pub struct OpenedFile {
     pub line_ending: LineEnding,
 }
 
-pub async fn open_file_dialog() -> Result<OpenedFile, String> {
-    let handle = rfd::AsyncFileDialog::new()
+pub async fn open_file_dialog() -> Vec<Result<OpenedFile, String>> {
+    let Some(handles) = rfd::AsyncFileDialog::new()
         .set_title("Open File")
         .add_filter("Text Files", &["txt", "rs", "toml", "md", "json", "xml", "html", "css", "js", "py", "c", "h", "cpp", "java"])
         .add_filter("All Files", &["*"])
-        .pick_file()
+        .pick_files()
         .await
-        .ok_or_else(|| "No file selected".to_string())?;
+    else {
+        // Dialog dismissed.
+        return Vec::new();
+    };
 
-    let path = handle.path().to_path_buf();
+    open_paths(handles.iter().map(|h| h.path().to_path_buf()).collect()).await
+}
+
+/// Opens every path in order, so the tabs end up in the order they were asked
+/// for no matter how fast each file reads.
+pub async fn open_paths(paths: Vec<PathBuf>) -> Vec<Result<OpenedFile, String>> {
+    let mut opened = Vec::with_capacity(paths.len());
+    for path in paths {
+        opened.push(open_path(path).await);
+    }
+    opened
+}
+
+/// Reads a file given by path, as passed on the command line, dropped onto the
+/// window, or picked in the open dialog.
+pub async fn open_path(path: PathBuf) -> Result<OpenedFile, String> {
+    let path = resolve(&path);
+
+    match tokio::fs::metadata(&path).await {
+        Ok(meta) if meta.is_dir() => {
+            return Err(format!("{} is a directory", path.display()));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            // A path that doesn't exist yet opens as an empty buffer bound to
+            // it, so saving creates the file -- as long as it could be written.
+            return match path.parent() {
+                Some(parent) if parent.as_os_str().is_empty() || parent.is_dir() => Ok(OpenedFile {
+                    path,
+                    content: String::new(),
+                    encoding: FileEncoding::Utf8,
+                    line_ending: default_line_ending(),
+                }),
+                Some(parent) => Err(format!("No such directory: {}", parent.display())),
+                None => Err(format!("Cannot open {}", path.display())),
+            };
+        }
+        Err(e) => return Err(format!("Cannot open {}: {e}", path.display())),
+    }
+
     let bytes = tokio::fs::read(&path)
         .await
-        .map_err(|e| format!("Failed to read file: {e}"))?;
+        .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
 
     let (content, encoding) = decode_bytes(&bytes);
     let line_ending = detect_line_ending(&content);
@@ -67,6 +109,29 @@ pub async fn open_file_dialog() -> Result<OpenedFile, String> {
         encoding,
         line_ending,
     })
+}
+
+/// Makes a path absolute so a tab keeps pointing at the same file regardless of
+/// the working directory, and so two ways of spelling one file share a tab.
+/// Paths that don't exist yet can't be canonicalized, hence the fallback.
+fn resolve(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        }
+    })
+}
+
+pub fn default_line_ending() -> LineEnding {
+    if cfg!(windows) {
+        LineEnding::CrLf
+    } else {
+        LineEnding::Lf
+    }
 }
 
 pub async fn save_file(
@@ -117,17 +182,20 @@ pub async fn save_file_as_dialog(
     content: String,
     encoding: FileEncoding,
     line_ending: LineEnding,
-) -> Result<PathBuf, String> {
-    let handle = rfd::AsyncFileDialog::new()
+) -> Result<Option<PathBuf>, String> {
+    let Some(handle) = rfd::AsyncFileDialog::new()
         .set_title("Save As")
         .add_filter("Text Files", &["txt"])
         .add_filter("All Files", &["*"])
         .save_file()
         .await
-        .ok_or_else(|| "No file selected".to_string())?;
+    else {
+        // Dialog dismissed; nothing to report.
+        return Ok(None);
+    };
 
     let path = handle.path().to_path_buf();
-    save_file(path, content, encoding, line_ending).await
+    save_file(path, content, encoding, line_ending).await.map(Some)
 }
 
 fn decode_bytes(bytes: &[u8]) -> (String, FileEncoding) {

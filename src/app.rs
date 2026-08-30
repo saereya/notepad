@@ -1,5 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, stack, text, text_editor};
 use iced::{Color, Element, Length, Subscription, Task};
+use std::path::PathBuf;
+use uuid::Uuid;
 
 use crate::editor_view;
 use crate::file_io::{self, OpenedFile};
@@ -27,10 +29,13 @@ pub enum Message {
 
     // File I/O
     OpenFile,
-    FileOpened(Result<OpenedFile, String>),
+    OpenPaths(Vec<PathBuf>),
+    FilesOpened(Vec<Result<OpenedFile, String>>),
     SaveFile,
     SaveFileAs,
-    FileSaved(Result<std::path::PathBuf, String>),
+    /// `None` means the Save As dialog was dismissed. The id says which tab the
+    /// save belongs to, since the active tab may have changed while it ran.
+    FileSaved(Uuid, Result<Option<PathBuf>, String>),
 
     // Edit
     Undo,
@@ -49,6 +54,7 @@ pub enum Message {
     ThemeDialog(ThemeDialogMessage),
 
     // Misc
+    DismissNotice,
     NoOp,
 }
 
@@ -63,10 +69,14 @@ pub struct App {
     word_wrap: bool,
     show_line_numbers: bool,
     pending_close_tab: Option<usize>,
+    /// Something the user needs to know about that has no other home, such as a
+    /// file passed on the command line that couldn't be read. A window opened
+    /// from a file manager has nowhere to print to.
+    notice: Option<String>,
 }
 
 impl App {
-    pub fn boot() -> (Self, Task<Message>) {
+    pub fn boot(paths: Vec<PathBuf>) -> (Self, Task<Message>) {
         let theme_config = crate::theme::config::load_config();
         let app = Self {
             tabs: vec![Tab::new()],
@@ -79,8 +89,23 @@ impl App {
             word_wrap: true,
             show_line_numbers: true,
             pending_close_tab: None,
+            notice: None,
         };
-        (app, Task::none())
+
+        let open_args = if paths.is_empty() {
+            Task::none()
+        } else {
+            Task::perform(file_io::open_paths(paths), Message::FilesOpened)
+        };
+
+        (app, open_args)
+    }
+
+    pub fn title(&self) -> String {
+        match self.tabs.get(self.active_tab) {
+            Some(tab) => format!("{} - Notepad", tab.display_title()),
+            None => "Notepad".to_string(),
+        }
     }
 
     pub fn theme(&self) -> iced::Theme {
@@ -88,7 +113,15 @@ impl App {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        if self.show_theme_dialog {
+        // Files dropped onto the window.
+        let dropped = iced::event::listen_with(|event, _status, _window| match event {
+            iced::Event::Window(iced::window::Event::FileDropped(path)) => {
+                Some(Message::OpenPaths(vec![path]))
+            }
+            _ => None,
+        });
+
+        let keys = if self.show_theme_dialog {
             iced::keyboard::listen().map(|event| {
                 use iced::keyboard::{Event, Key};
                 match event {
@@ -112,7 +145,9 @@ impl App {
             })
         } else {
             Subscription::none()
-        }
+        };
+
+        Subscription::batch([dropped, keys])
     }
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -190,32 +225,50 @@ impl App {
 
             // --- File I/O ---
             Message::OpenFile => {
-                Task::perform(file_io::open_file_dialog(), Message::FileOpened)
+                Task::perform(file_io::open_file_dialog(), Message::FilesOpened)
             }
-            Message::FileOpened(Ok(opened)) => {
-                let tab = Tab::from_file(
-                    opened.path,
-                    opened.content,
-                    opened.encoding,
-                    opened.line_ending,
-                );
-                self.tabs.push(tab);
-                self.active_tab = self.tabs.len() - 1;
-                Task::none()
+            Message::OpenPaths(paths) => {
+                if paths.is_empty() {
+                    return Task::none();
+                }
+                Task::perform(file_io::open_paths(paths), Message::FilesOpened)
             }
-            Message::FileOpened(Err(e)) => {
-                eprintln!("Error opening file: {e}");
+            Message::FilesOpened(results) => {
+                let mut errors = Vec::new();
+                let mut first = None;
+
+                for result in results {
+                    match result {
+                        Ok(opened) => {
+                            let id = self.open_in_tab(opened);
+                            first.get_or_insert(id);
+                        }
+                        Err(e) => errors.push(e),
+                    }
+                }
+
+                // Show the first file of the batch, the way the arguments read.
+                if let Some(idx) = first.and_then(|id| self.tabs.iter().position(|t| t.id == id)) {
+                    self.active_tab = idx;
+                }
+
+                self.report(errors);
                 Task::none()
             }
             Message::SaveFile => {
                 if let Some(tab) = self.tabs.get(self.active_tab) {
                     if let Some(path) = tab.file_path.clone() {
+                        let id = tab.id;
                         let content = tab.text();
                         let encoding = tab.encoding.clone();
                         let line_ending = tab.line_ending;
                         return Task::perform(
-                            file_io::save_file(path, content, encoding, line_ending),
-                            Message::FileSaved,
+                            async move {
+                                file_io::save_file(path, content, encoding, line_ending)
+                                    .await
+                                    .map(Some)
+                            },
+                            move |result| Message::FileSaved(id, result),
                         );
                     } else {
                         return self.update(Message::SaveFileAs);
@@ -225,18 +278,21 @@ impl App {
             }
             Message::SaveFileAs => {
                 if let Some(tab) = self.tabs.get(self.active_tab) {
+                    let id = tab.id;
                     let content = tab.text();
                     let encoding = tab.encoding.clone();
                     let line_ending = tab.line_ending;
                     return Task::perform(
                         file_io::save_file_as_dialog(content, encoding, line_ending),
-                        Message::FileSaved,
+                        move |result| Message::FileSaved(id, result),
                     );
                 }
                 Task::none()
             }
-            Message::FileSaved(Ok(path)) => {
-                if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+            Message::FileSaved(id, Ok(Some(path))) => {
+                // The save ran asynchronously, so find the tab it started from
+                // rather than whichever one happens to be active now.
+                if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.id == id) {
                     tab.title = path
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
@@ -246,8 +302,9 @@ impl App {
                 }
                 Task::none()
             }
-            Message::FileSaved(Err(e)) => {
-                eprintln!("Error saving file: {e}");
+            Message::FileSaved(_, Ok(None)) => Task::none(),
+            Message::FileSaved(_, Err(e)) => {
+                self.report(vec![e]);
                 Task::none()
             }
 
@@ -368,6 +425,11 @@ impl App {
                 Task::none()
             }
 
+            Message::DismissNotice => {
+                self.notice = None;
+                Task::none()
+            }
+
             Message::NoOp => Task::none(),
         }
     }
@@ -466,8 +528,34 @@ impl App {
             .into()
         });
 
+        // --- Notice bar (file errors and the like) ---
+        let notice: Option<Element<Message>> = self.notice.as_ref().map(|message| {
+            let bar_bg = preset.accent.to_iced();
+            let fg = preset.foreground.to_iced();
+            container(
+                row![
+                    text(message.clone()).size(13).color(fg),
+                    button(text("Dismiss").size(13))
+                        .on_press(Message::DismissNotice)
+                        .padding([2, 10]),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([6, 12])
+            .style(move |_theme: &iced::Theme| container::Style {
+                background: Some(iced::Background::Color(bar_bg)),
+                ..Default::default()
+            })
+            .into()
+        });
+
         // --- Compose layout ---
         let mut layout = column![menu_bar, tab_bar].width(Length::Fill).height(Length::Fill);
+        if let Some(bar) = notice {
+            layout = layout.push(bar);
+        }
         if let Some(bar) = close_confirm {
             layout = layout.push(bar);
         }
@@ -606,6 +694,52 @@ impl App {
                 tab.move_cursor_to_select(line, col, self.find_replace.search_term.len());
             }
         }
+    }
+
+    /// Puts an opened file in a tab and focuses it, returning that tab's id.
+    fn open_in_tab(&mut self, opened: OpenedFile) -> Uuid {
+        // A file that is already open just gets focus. Two tabs on one path
+        // would silently overwrite each other on save.
+        if let Some(idx) = self
+            .tabs
+            .iter()
+            .position(|tab| tab.file_path.as_deref() == Some(opened.path.as_path()))
+        {
+            self.active_tab = idx;
+            return self.tabs[idx].id;
+        }
+
+        let tab = Tab::from_file(
+            opened.path,
+            opened.content,
+            opened.encoding,
+            opened.line_ending,
+        );
+
+        if self.tabs.len() == 1 && self.tabs[0].is_scratch() {
+            self.tabs.clear();
+        }
+
+        let id = tab.id;
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+        id
+    }
+
+    fn report(&mut self, errors: Vec<String>) {
+        let Some(first) = errors.first() else {
+            return;
+        };
+
+        for error in &errors {
+            eprintln!("notepad: {error}");
+        }
+
+        self.notice = Some(if errors.len() > 1 {
+            format!("{first} (+{} more)", errors.len() - 1)
+        } else {
+            first.clone()
+        });
     }
 
     fn close_tab(&mut self, idx: usize) {

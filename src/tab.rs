@@ -2,7 +2,7 @@ use iced::widget::text_editor;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use crate::file_io::{FileEncoding, LineEnding};
+use crate::file_io::{self, FileEncoding, LineEnding};
 use crate::undo::{CursorPos, UndoStack};
 
 pub struct Tab {
@@ -26,12 +26,14 @@ impl Tab {
             undo_stack: UndoStack::new(),
             is_dirty: false,
             encoding: FileEncoding::Utf8,
-            line_ending: if cfg!(windows) {
-                LineEnding::CrLf
-            } else {
-                LineEnding::Lf
-            },
+            line_ending: file_io::default_line_ending(),
         }
+    }
+
+    /// True for the untouched buffer a fresh window starts with. Opening a file
+    /// reuses that slot instead of leaving an empty tab in front of it.
+    pub fn is_scratch(&self) -> bool {
+        self.file_path.is_none() && !self.is_dirty && self.content.text().trim().is_empty()
     }
 
     pub fn from_file(path: PathBuf, content: String, encoding: FileEncoding, line_ending: LineEnding) -> Self {
